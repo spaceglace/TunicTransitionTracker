@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -110,7 +111,7 @@ func getSceneFromFlag(flag string) string {
 	return scene
 }
 
-func parseWithSpoiler(saveLoc, spoilerLoc string) Save {
+func parseWithSpoiler(saveLoc, spoilerLoc string) (Save, error) {
 	payload := Save{
 		Debug:  Debug{},
 		Totals: Totals{},
@@ -132,7 +133,11 @@ func parseWithSpoiler(saveLoc, spoilerLoc string) Save {
 	// open spoiler.log
 	spoilerReader, err := os.Open(spoilerLoc)
 	if err != nil {
-		panic(err)
+		logger.Error("Failed to open spoiler log",
+			zap.String("spoiler location", spoilerLoc),
+			zap.Error(err),
+		)
+		return payload, fmt.Errorf("Failed to open spoiler log: %w", err)
 	}
 	spoilerScanner := bufio.NewScanner(spoilerReader)
 	spoilerScanner.Split(bufio.ScanLines)
@@ -197,8 +202,14 @@ func parseWithSpoiler(saveLoc, spoilerLoc string) Save {
 	payload.Debug.Name = recent
 	saveReader, err := os.Open(path.Join(saveLoc, recent))
 	if err != nil {
-		panic(err)
+		logger.Error("Failed to open spoiler log",
+			zap.String("save location", saveLoc),
+			zap.String("most recent", recent),
+			zap.Error(err),
+		)
+		return payload, fmt.Errorf("Failed to open most recent save file: %w", err)
 	}
+
 	saveScanner := bufio.NewScanner(saveReader)
 	saveScanner.Split(bufio.ScanLines)
 	entrances := map[string]struct{}{}
@@ -279,7 +290,7 @@ func parseWithSpoiler(saveLoc, spoilerLoc string) Save {
 		}
 	}
 
-	return payload
+	return payload, nil
 }
 
 func parseWithoutSpoiler(saveLoc string) Save {
@@ -452,7 +463,8 @@ func main() {
 	settings := loadSettings()
 
 	logger.Info("Welcome to the Tunic Transition Tracker!",
-		zap.String("api", ":8000"))
+		zap.String("api", ":8000"),
+	)
 
 	/*
 		// TODO: timer to poll for changes, vs recreating every call
@@ -470,14 +482,19 @@ func main() {
 	e.Static("/", "frontend/")
 
 	e.GET("/spoiler", func(c echo.Context) error {
-		payload := parseWithSpoiler(saves, spoiler)
-		logger.Debug("Running /spoiler")
+		payload, err := parseWithSpoiler(saves, spoiler)
+		if err != nil {
+			logger.Error("Error parsing with spoiler",
+				zap.Error(err),
+			)
+			return echo.NewHTTPError(http.StatusInternalServerError, "Server error. Please check server logs")
+		}
 		return c.JSON(http.StatusOK, payload)
 	})
 
 	e.GET("/nospoiler", func(c echo.Context) error {
 		payload := parseWithoutSpoiler(saves)
-		logger.Debug("Running /nospoiler")
+		logger.Warn("mostly unimplemented")
 		return c.JSON(http.StatusOK, payload)
 	})
 
