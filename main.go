@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -23,10 +24,12 @@ var (
 	logger *zap.Logger
 )
 
+const ()
+
 type (
 	Settings struct {
-		SaveLocation    string `json:"saveFolder"`
-		SpoilerLocation string `json:"spoilerLocation"`
+		SecretLegend string `json:"secretLegend"`
+		Address      string `json:"address"`
 	}
 
 	Debug struct {
@@ -52,11 +55,18 @@ type (
 		Checks    map[string]bool
 		Entrances map[string]string
 	}
+	Current struct {
+		Scene      string
+		Respawn    string
+		Dath       string
+		HasLaurels bool
+		HasDath    bool
+	}
 	Save struct {
-		Debug  Debug
-		Totals Totals
-		Scene  string
-		Scenes map[string]Scene
+		Debug   Debug
+		Totals  Totals
+		Current Current
+		Scenes  map[string]Scene
 	}
 )
 
@@ -87,6 +97,17 @@ func mostRecentSave(path string) string {
 	}
 
 	return mostRecent
+}
+
+func getSceneFromFlag(flag string) string {
+	rawScene := strings.Split(flag, "|")[1]
+	scene, err := TranslateScene(rawScene)
+	if err != nil {
+		logger.Error("Failed to translate current scene",
+			zap.String("scene", rawScene),
+		)
+	}
+	return scene
 }
 
 func parseWithSpoiler(saveLoc, spoilerLoc string) Save {
@@ -197,17 +218,18 @@ func parseWithSpoiler(saveLoc, spoilerLoc string) Save {
 			payload.Debug.EntranceRando = true
 		} else if line == "randomizer ER fixed shop|1" {
 			payload.Debug.FixedShops = true
+		} else if line == "inventory quantity Dath Stone|1" {
+			payload.Current.HasDath = true
+		} else if line == "inventory quantity Hyperdash|1" {
+			payload.Current.HasLaurels = true
 		} else if strings.HasPrefix(line, "seed|") {
 			payload.Debug.Seed = strings.Split(line, "|")[1]
 		} else if strings.HasPrefix(line, "last spawn scene name|") {
-			rawScene := strings.Split(line, "|")[1]
-			scene, err := TranslateScene(rawScene)
-			if err != nil {
-				logger.Error("Failed to translate current scene",
-					zap.String("scene", rawScene),
-				)
-			}
-			payload.Scene = scene
+			payload.Current.Scene = getSceneFromFlag(line)
+		} else if strings.HasPrefix(line, "last campfire scene name|") {
+			payload.Current.Respawn = getSceneFromFlag(line)
+		} else if strings.HasPrefix(line, "randomizer last campfire scene name for dath stone|") {
+			payload.Current.Dath = getSceneFromFlag(line)
 		}
 
 		matches := portalRegex.FindStringSubmatch(line)
@@ -314,7 +336,7 @@ func parseWithoutSpoiler(saveLoc string) Save {
 					zap.Error(err),
 				)
 			}
-			payload.Scene = scene
+			payload.Current.Scene = scene
 		}
 
 		matches := portalRegex.FindStringSubmatch(line)
@@ -406,32 +428,31 @@ func parseWithoutSpoiler(saveLoc string) Save {
 }
 
 func loadSettings() Settings {
-	// assume there's a settings.json
+	// no longer assume there's a settings.json
+	var settings Settings
 	s, err := os.Open("settings.json")
 	if err != nil {
-		q, _ := json.MarshalIndent(Settings{}, "", "	")
+		q, _ := json.MarshalIndent(Settings{
+			Address: ":8000",
+		}, "", "	")
 		ioutil.WriteFile("settings.json", q, os.ModePerm)
-
-		logger.Fatal("Expected 'settings.json' in same directory. Creating template...")
-		panic(err)
+		logger.Warn("No settings found! Please configure through the frontend or via settings.json")
+	} else {
+		json.NewDecoder(s).Decode(&settings)
 	}
-	var settings Settings
-	json.NewDecoder(s).Decode(&settings)
 
 	return settings
 }
 
 func main() {
-	settings := loadSettings()
-
 	e := echo.New()
 	e.HideBanner = true
 
-	address := ":8000"
-
 	logger, _ = zap.NewProduction()
+	settings := loadSettings()
+
 	logger.Info("Welcome to the Tunic Transition Tracker!",
-		zap.String("api", address))
+		zap.String("api", ":8000"))
 
 	/*
 		// TODO: timer to poll for changes, vs recreating every call
@@ -443,17 +464,68 @@ func main() {
 		}
 	*/
 
+	spoiler := filepath.Join(settings.SecretLegend, "Randomizer", "Spoiler.log")
+	saves := filepath.Join(settings.SecretLegend, "SAVES")
+
+	e.Static("/", "frontend/")
+
 	e.GET("/spoiler", func(c echo.Context) error {
-		payload := parseWithSpoiler(settings.SaveLocation, settings.SpoilerLocation)
+		payload := parseWithSpoiler(saves, spoiler)
 		logger.Debug("Running /spoiler")
 		return c.JSON(http.StatusOK, payload)
 	})
 
 	e.GET("/nospoiler", func(c echo.Context) error {
-		payload := parseWithoutSpoiler(settings.SaveLocation)
+		payload := parseWithoutSpoiler(saves)
 		logger.Debug("Running /nospoiler")
 		return c.JSON(http.StatusOK, payload)
 	})
 
-	logger.Error("Exiting server", zap.Error(e.Start(address)))
+	e.GET("/settings", func(c echo.Context) error {
+		return c.JSON(http.StatusOK, settings)
+	})
+
+	e.POST("/settings", func(c echo.Context) error {
+		payload := Settings{}
+		if err := c.Bind(&payload); err != nil {
+			logger.Error("Failed to read new settings",
+				zap.Error(err),
+			)
+			return err
+		}
+		old := settings
+		settings = payload
+		f, err := os.OpenFile("settings.json", os.O_RDWR|os.O_CREATE|os.O_TRUNC, os.ModePerm)
+		if err != nil {
+			logger.Error("Failed to open settings file for writing",
+				zap.Error(err),
+			)
+			return err
+		}
+
+		q, err := json.MarshalIndent(payload, "", "	")
+		if err != nil {
+			logger.Error("Failed to marshall settings struct into string",
+				zap.Error(err),
+			)
+			return err
+		}
+
+		_, err = f.Write(q)
+		if err != nil {
+			logger.Error("Failed to write settings file",
+				zap.Error(err),
+			)
+			return err
+		}
+		f.Close()
+
+		if old.Address != settings.Address {
+			logger.Warn("Binding address has changed! PLEASE RESTART THIS FOR CHANGES TO TAKE EFFECT")
+		}
+
+		return c.JSON(http.StatusOK, settings)
+	})
+
+	logger.Error("Exiting server", zap.Error(e.Start(":8000")))
 }
