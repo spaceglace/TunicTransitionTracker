@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 	"go.uber.org/zap"
 )
 
@@ -458,6 +459,11 @@ func loadSettings() Settings {
 func main() {
 	e := echo.New()
 	e.HideBanner = true
+
+	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOrigins: []string{"*"},
+		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept},
+	}))
 
 	logger, _ = zap.NewProduction()
 	settings := loadSettings()
