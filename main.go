@@ -139,7 +139,7 @@ func parseWithSpoiler(recent, saves, spoilerLoc string) (Save, error) {
 	spoiler := map[string]string{}
 
 	// populate our payload with each code family
-	for family, section := range codes {
+	for family, section := range codesByScene {
 		payload.Codes[family] = map[string]bool{}
 		for code := range section {
 			payload.Codes[family][code] = false
@@ -268,7 +268,7 @@ func parseWithSpoiler(recent, saves, spoilerLoc string) (Save, error) {
 		}
 
 		// holy cross code flags
-		for family, section := range codes {
+		for family, section := range codesByScene {
 			for check, code := range section {
 				if line == code {
 					payload.Codes[family][check] = true
