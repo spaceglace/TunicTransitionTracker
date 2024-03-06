@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -16,6 +18,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 var (
@@ -36,8 +39,10 @@ type (
 
 	Debug struct {
 		Name          string
+		Hash          string
 		Seed          string
 		SpoilerSeed   string
+		SpoilerMod    time.Time
 		Archipelago   bool
 		Randomized    bool
 		HexQuest      bool
@@ -69,6 +74,7 @@ type (
 		Totals  Totals
 		Current Current
 		Scenes  map[string]Scene
+		Codes   map[string]map[string]bool
 	}
 )
 
@@ -112,11 +118,12 @@ func getSceneFromFlag(flag string) string {
 	return scene
 }
 
-func parseWithSpoiler(saveLoc, spoilerLoc string) (Save, error) {
+func parseWithSpoiler(recent, saves, spoilerLoc string) (Save, error) {
 	payload := Save{
 		Debug:  Debug{},
 		Totals: Totals{},
 		Scenes: map[string]Scene{},
+		Codes:  map[string]map[string]bool{},
 	}
 	// populate our payload with every scene
 	for _, a := range sceneNames {
@@ -130,6 +137,28 @@ func parseWithSpoiler(saveLoc, spoilerLoc string) (Save, error) {
 		}
 	}
 	spoiler := map[string]string{}
+
+	// populate our payload with each code family
+	for family, section := range codes {
+		payload.Codes[family] = map[string]bool{}
+		for code := range section {
+			payload.Codes[family][code] = false
+		}
+	}
+
+	// get spoiler.log update time
+	spoilerStat, err := os.Stat(spoilerLoc)
+	if err != nil {
+		logger.Error("Failed to get spoiler log stats",
+			zap.String("spoiler location", spoilerLoc),
+			zap.Error(err),
+		)
+		return payload, fmt.Errorf("Failed to stat spoiler log: %w", err)
+	}
+	payload.Debug.SpoilerMod = spoilerStat.ModTime()
+
+	hash := md5.Sum([]byte(recent + spoilerStat.ModTime().String()))
+	payload.Debug.Hash = hex.EncodeToString(hash[:])
 
 	// open spoiler.log
 	spoilerReader, err := os.Open(spoilerLoc)
@@ -193,18 +222,12 @@ func parseWithSpoiler(saveLoc, spoilerLoc string) (Save, error) {
 	}
 	spoilerReader.Close()
 
-	logger.Debug("Finished parsing Spoiler.log",
-		zap.Int("Items", payload.Totals.Checks.Total),
-		zap.Int("Entrances", payload.Totals.Entrances.Total),
-	)
-
 	// open save file
-	recent := mostRecentSave(saveLoc)
 	payload.Debug.Name = recent
-	saveReader, err := os.Open(path.Join(saveLoc, recent))
+	saveReader, err := os.Open(path.Join(saves, recent))
 	if err != nil {
 		logger.Error("Failed to open spoiler log",
-			zap.String("save location", saveLoc),
+			zap.String("save location", saves),
 			zap.String("most recent", recent),
 			zap.Error(err),
 		)
@@ -242,6 +265,15 @@ func parseWithSpoiler(saveLoc, spoilerLoc string) (Save, error) {
 			payload.Current.Respawn = getSceneFromFlag(line)
 		} else if strings.HasPrefix(line, "randomizer last campfire scene name for dath stone|") {
 			payload.Current.Dath = getSceneFromFlag(line)
+		}
+
+		// holy cross code flags
+		for family, section := range codes {
+			for check, code := range section {
+				if line == code {
+					payload.Codes[family][check] = true
+				}
+			}
 		}
 
 		matches := portalRegex.FindStringSubmatch(line)
@@ -290,6 +322,12 @@ func parseWithSpoiler(saveLoc, spoilerLoc string) (Save, error) {
 			}
 		}
 	}
+
+	logger.Debug("Finished parsing",
+		zap.Int("items", payload.Totals.Checks.Total),
+		zap.Int("entrances", payload.Totals.Entrances.Total),
+		zap.String("hash", payload.Debug.Hash),
+	)
 
 	return payload, nil
 }
@@ -465,37 +503,61 @@ func main() {
 		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept},
 	}))
 
-	logger, _ = zap.NewProduction()
+	pe := zap.NewProductionEncoderConfig()
+	pe.EncodeTime = zapcore.ISO8601TimeEncoder
+	consoleEncoder := zapcore.NewConsoleEncoder(pe)
+	level := zap.DebugLevel
+	core := zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), level)
+	logger = zap.New(core)
+
 	settings := loadSettings()
-
-	logger.Info("Welcome to the Tunic Transition Tracker!",
-		zap.String("api", ":8000"),
-	)
-
-	/*
-		// TODO: timer to poll for changes, vs recreating every call
-		tick := time.NewTicker(500 * time.Millisecond)
-		go func() {
-			for {
-				<-tick.C
-			}
-		}
-	*/
-
 	spoiler := filepath.Join(settings.SecretLegend, "Randomizer", "Spoiler.log")
 	saves := filepath.Join(settings.SecretLegend, "SAVES")
+
+	logger.Info("Welcome to the Tunic Transition Tracker!",
+		zap.String("listener", settings.Address),
+	)
+
+	tick := time.NewTicker(250 * time.Millisecond)
+	state := Save{}
+	go func() {
+		for {
+			<-tick.C
+			changedSave := false
+			changedSpoiler := false
+			check := mostRecentSave(saves)
+			// TODO: handle if there's no save file
+			changedSave = check != state.Debug.Name
+
+			// check the spoiler.log for updates
+			spoilerStat, err := os.Stat(spoiler)
+			if err != nil {
+				//TODO: handle if spoiler stat errors
+			}
+			changedSpoiler = !state.Debug.SpoilerMod.Equal(spoilerStat.ModTime())
+
+			if changedSave || changedSpoiler {
+				logger.Debug("Detected update",
+					zap.Bool("save updated", changedSave),
+					zap.Bool("spoiler updated", changedSpoiler),
+					zap.String("save name", check),
+					zap.Time("spoiler update", spoilerStat.ModTime()),
+				)
+				blob, err := parseWithSpoiler(check, saves, spoiler)
+				state = blob
+				if err != nil {
+					logger.Error("Error attempting to parse save state",
+						zap.Error(err),
+					)
+				}
+			}
+		}
+	}()
 
 	e.Static("/", "frontend/")
 
 	e.GET("/spoiler", func(c echo.Context) error {
-		payload, err := parseWithSpoiler(saves, spoiler)
-		if err != nil {
-			logger.Error("Error parsing with spoiler",
-				zap.Error(err),
-			)
-			return echo.NewHTTPError(http.StatusInternalServerError, "Server error. Please check server logs")
-		}
-		return c.JSON(http.StatusOK, payload)
+		return c.JSON(http.StatusOK, state)
 	})
 
 	e.GET("/nospoiler", func(c echo.Context) error {
