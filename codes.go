@@ -2,6 +2,11 @@ package main
 
 var (
 	codesByScene = map[string]map[string]string{
+		"Global": {
+			"Firecracker": "Granted Firecracker|1",
+			"Firebomb":    "Granted Firebomb|1",
+			"Icebomb":     "Granted Icebomb|1",
+		},
 		"Overworld": {
 			"Upper Flowers Fairy":      "SV_Fairy_1_Overworld_Flowers_Upper_Revealed|1",
 			"Lower Flower Fairy":       "SV_Fairy_2_Overworld_Flowers_Lower_Revealed|1",
