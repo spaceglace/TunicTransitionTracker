@@ -1,4 +1,4 @@
-package main
+package tracker
 
 var (
 	codesByScene = map[string]map[string]string{
