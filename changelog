@@ -1,3 +1,6 @@
+Region Locked
+    - Send region data with doorway information
+
 Shopocalypse
     - Fixed shops being tracked in entrances
     - Versioning on startup
