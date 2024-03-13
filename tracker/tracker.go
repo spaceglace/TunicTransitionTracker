@@ -267,9 +267,19 @@ func ParseWithSpoiler(recent, saves, spoilerLoc string) error {
 					)
 					continue
 				}
+				// look up what region this exit is a part of
+				exitScene, ok := doorRegions[mapping]
+				if !ok {
+					log.Log.Warn("Found destination door with no associated region",
+						zap.String("line", line),
+						zap.String("origin", matches[1]),
+						zap.String("destination", mapping),
+					)
+					continue
+				}
 
 				temp := payload.Scenes[region]
-				temp.Entrances[matches[1]] = Door{region, mapping}
+				temp.Entrances[matches[1]] = Door{exitScene, mapping}
 				temp.Totals.Entrances.Total++
 				payload.Scenes[region] = temp
 			}
