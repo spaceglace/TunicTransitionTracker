@@ -17,7 +17,7 @@ func main() {
 	log.Initialize()
 	settings.Load()
 
-	version := "Shopocalypse"
+	version := "Region locked"
 
 	log.Log.Info("Welcome to the Tunic Transition Tracker!",
 		zap.String("path", settings.State.SecretLegend),

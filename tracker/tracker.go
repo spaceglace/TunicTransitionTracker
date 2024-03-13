@@ -36,10 +36,14 @@ type (
 		Entrances Total
 		Checks    Total
 	}
+	Door struct {
+		Scene string
+		Door  string
+	}
 	Scene struct {
 		Totals    Totals
 		Checks    map[string]bool
-		Entrances map[string]string
+		Entrances map[string]Door
 	}
 	Current struct {
 		Scene      string
@@ -91,7 +95,7 @@ func ParseWithSpoiler(recent, saves, spoilerLoc string) error {
 				Checks:    Total{},
 			},
 			Checks:    map[string]bool{},
-			Entrances: map[string]string{},
+			Entrances: map[string]Door{},
 		}
 	}
 	spoiler := map[string]string{}
@@ -265,7 +269,7 @@ func ParseWithSpoiler(recent, saves, spoilerLoc string) error {
 				}
 
 				temp := payload.Scenes[region]
-				temp.Entrances[matches[1]] = mapping
+				temp.Entrances[matches[1]] = Door{region, mapping}
 				temp.Totals.Entrances.Total++
 				payload.Scenes[region] = temp
 			}
@@ -285,7 +289,7 @@ func ParseWithSpoiler(recent, saves, spoilerLoc string) error {
 			if !ok {
 				payload.Totals.Entrances.Undiscovered++
 				temp := payload.Scenes[scene]
-				temp.Entrances[door] = ""
+				temp.Entrances[door] = Door{}
 				temp.Totals.Entrances.Total++
 				temp.Totals.Entrances.Undiscovered++
 				payload.Scenes[scene] = temp
@@ -297,8 +301,10 @@ func ParseWithSpoiler(recent, saves, spoilerLoc string) error {
 	if foundShop {
 		temp := payload.Scenes["Shop"]
 		for i, destination := range shopList {
+			// get region for door
+			region := doorRegions[destination]
 			temp.Totals.Entrances.Total++
-			temp.Entrances[fmt.Sprintf("Shop Portal %d", i+1)] = destination
+			temp.Entrances[fmt.Sprintf("Shop Portal %d", i+1)] = Door{region, destination}
 		}
 		payload.Scenes["Shop"] = temp
 	}
