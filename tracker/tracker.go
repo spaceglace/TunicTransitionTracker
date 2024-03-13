@@ -130,10 +130,12 @@ func ParseWithSpoiler(recent, saves, spoilerLoc string) error {
 	spoilerScanner := bufio.NewScanner(spoilerReader)
 	spoilerScanner.Split(bufio.ScanLines)
 
+	shopList := []string{}
 	quiesce := false
+
 	for spoilerScanner.Scan() {
 		line := spoilerScanner.Text()
-
+		// skip the "Major Items" section of the spoiler log
 		if quiesce && strings.HasPrefix(line, "\t") {
 			continue
 		}
@@ -142,11 +144,10 @@ func ParseWithSpoiler(recent, saves, spoilerLoc string) error {
 			quiesce = true
 			continue
 		}
-
+		// look for the specific seed of the spoiler
 		if strings.HasPrefix(line, "Seed: ") {
 			payload.Debug.SpoilerSeed = strings.TrimPrefix(line, "Seed: ")
 		}
-
 		// check if this is an item line
 		matches := itemRegex.FindStringSubmatch(line)
 		if len(matches) > 0 {
@@ -169,10 +170,13 @@ func ParseWithSpoiler(recent, saves, spoilerLoc string) error {
 			}
 			payload.Scenes[matches[2]] = temp
 		}
-
 		// check if this is an entrance connection line
 		matches = entranceRegex.FindStringSubmatch(line)
 		if len(matches) > 0 {
+			// keep a separate listing of shop entrances
+			if matches[2] == "Shop" || matches[2] == "Shop Portal" {
+				shopList = append(shopList, matches[1])
+			}
 			payload.Totals.Entrances.Total += 2
 			spoiler[matches[1]] = matches[2]
 			spoiler[matches[2]] = matches[1]
@@ -195,6 +199,8 @@ func ParseWithSpoiler(recent, saves, spoilerLoc string) error {
 	saveScanner := bufio.NewScanner(saveReader)
 	saveScanner.Split(bufio.ScanLines)
 	entrances := map[string]struct{}{}
+
+	foundShop := false
 
 	for saveScanner.Scan() {
 		line := saveScanner.Text()
@@ -237,8 +243,9 @@ func ParseWithSpoiler(recent, saves, spoilerLoc string) error {
 		matches := portalRegex.FindStringSubmatch(line)
 		if len(matches) > 1 {
 			entrances[matches[1]] = struct{}{}
-			// we hate shops
-			if matches[1] == "Shop Portal" || matches[1] == "Shop" {
+			// don't add mapping here, but remember we found the shop(s)
+			if matches[1] == "Shop" {
+				foundShop = true
 				continue
 			}
 			// look up the entrance pairings
@@ -269,6 +276,11 @@ func ParseWithSpoiler(recent, saves, spoilerLoc string) error {
 	// look for unfound entrances
 	for scene, doors := range allDoors {
 		for _, door := range doors {
+			// skip shops "because they're weird" (thanks tunic randomizer)
+			if door == "Shop" || door == "Shop Portal" {
+				continue
+			}
+
 			_, ok := entrances[door]
 			if !ok {
 				payload.Totals.Entrances.Undiscovered++
@@ -279,6 +291,16 @@ func ParseWithSpoiler(recent, saves, spoilerLoc string) error {
 				payload.Scenes[scene] = temp
 			}
 		}
+	}
+
+	// populate shops
+	if foundShop {
+		temp := payload.Scenes["Shop"]
+		for i, destination := range shopList {
+			temp.Totals.Entrances.Total++
+			temp.Entrances[fmt.Sprintf("Shop Portal %d", i+1)] = destination
+		}
+		payload.Scenes["Shop"] = temp
 	}
 
 	if payload.Debug.Seed != payload.Debug.SpoilerSeed {

@@ -17,9 +17,12 @@ func main() {
 	log.Initialize()
 	settings.Load()
 
+	version := "Shopocalypse"
+
 	log.Log.Info("Welcome to the Tunic Transition Tracker!",
 		zap.String("path", settings.State.SecretLegend),
 		zap.String("listener", settings.State.Address),
+		zap.String("version", version),
 	)
 	// poll for updates every 250ms
 	tick := time.NewTicker(250 * time.Millisecond)
