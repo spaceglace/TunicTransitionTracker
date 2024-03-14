@@ -36,7 +36,6 @@ func Load() {
 		State = standard
 	} else {
 		json.NewDecoder(s).Decode(&settings)
+		State = settings
 	}
-
-	State = settings
 }

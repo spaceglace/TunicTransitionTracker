@@ -186,6 +186,7 @@ var (
 		"Fortress Hero's Grave":                           "Fortress Grave Path",
 		"Fortress Grave Path Upper Exit":                  "Fortress Grave Path",
 		"Fortress Grave Path Lower Exit":                  "Fortress Grave Path",
+		"Shop":                                            "Shop",
 		"Shop Portal":                                     "Shop",
 		"East Fortress to Interior Lower":                 "Fortress East Shortcut",
 		"East Fortress to Interior Upper":                 "Fortress East Shortcut",

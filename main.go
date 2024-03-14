@@ -17,22 +17,22 @@ func main() {
 	log.Initialize()
 	settings.Load()
 
-	version := "Region locked"
+	version := "Assay"
 
 	log.Log.Info("Welcome to the Tunic Transition Tracker!",
 		zap.String("path", settings.State.SecretLegend),
 		zap.String("listener", settings.State.Address),
 		zap.String("version", version),
 	)
-	// poll for updates every 250ms
-	tick := time.NewTicker(250 * time.Millisecond)
+	// poll for updates on a set interval
+	tick := time.NewTicker(200 * time.Millisecond)
 	go func() {
 		consecutiveFailures := 0
-
 		noDirWarningArm := true
 		noSaveWarningArm := true
 
 		for {
+			// wait for the timer to tick over
 			<-tick.C
 			spoiler := filepath.Join(settings.State.SecretLegend, "Randomizer", "Spoiler.log")
 			saves := filepath.Join(settings.State.SecretLegend, "SAVES")
@@ -42,6 +42,7 @@ func main() {
 			mostRecentMod := time.Time{}
 			files, err := os.ReadDir(saves)
 			if err != nil {
+				// warn about saves but don't spam
 				if noDirWarningArm {
 					log.Log.Error("Could not read tunic SAVES directory",
 						zap.String("saves", saves),
@@ -72,6 +73,7 @@ func main() {
 			}
 			// make sure we found at least one save file
 			if check == "" {
+				// warn about lack of saves but don't spam
 				if noSaveWarningArm {
 					log.Log.Error("Could not find any .tunic files in SAVES directory",
 						zap.String("saves", saves),
